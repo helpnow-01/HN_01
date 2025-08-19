@@ -1468,7 +1468,7 @@
 
                 if (statusMsg) {
 
-                    statusMsg.textContent = 'Loading AI model (this may take 60+ seconds first time)...';
+                    statusMsg.textContent = 'Loading AI model (first use may take 60+ seconds)...';
 
                 }
 
@@ -1480,7 +1480,7 @@
 
                 if (statusMsg) {
 
-                    statusMsg.textContent = 'Model loaded! Speak now in any target language...';
+                    statusMsg.textContent = 'Model loaded! Speak clearly in any target language...';
 
                 }
 
@@ -1518,7 +1518,7 @@
 
                 mediaRecorder = new MediaRecorder(stream, {
 
-                    mimeType: 'audio/webm'
+                    mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
 
                 });
 
@@ -1560,7 +1560,7 @@
 
                 
 
-                // Record for 5 seconds, then process
+                // Record for 4 seconds, then process
 
                 setTimeout(async () => {
 
@@ -1570,7 +1570,7 @@
 
                     }
 
-                }, 5000);
+                }, 4000);
 
                 
 
@@ -1586,7 +1586,7 @@
 
                         confidenceScore = 0;
 
-                        detectedText = 'No speech detected or language not recognized';
+                        detectedText = detectedText || 'No clear speech detected in 15 seconds';
 
                         
 
@@ -1606,9 +1606,17 @@
 
                 console.error('Failed to start real-time detection:', error);
 
+                const statusMsg = document.getElementById('whisperStatus');
+
+                if (statusMsg) {
+
+                    statusMsg.textContent = 'Error starting detection, using simulation mode...';
+
+                }
+
                 // Fallback to simulation
 
-                startSimulation();
+                setTimeout(() => startSimulation(), 2000);
 
             }
 
@@ -1630,7 +1638,7 @@
 
                 if (statusMsg) {
 
-                    statusMsg.textContent = 'Processing speech... Testing all languages...';
+                    statusMsg.textContent = 'Processing speech... Analyzing language...';
 
                 }
 
@@ -1652,15 +1660,15 @@
 
                 
 
-                // Run multi-language detection
+                // Run language detection
 
                 const result = await detectLanguageFromAudio(audioData);
 
                 
 
-                if (result && result.confidence > 30 && currentState === 'detecting') {
+                if (result && result.confidence > 40 && currentState === 'detecting') {
 
-                    // Found detection!
+                    // Found good detection!
 
                     detectedLanguage = result.language;
 
@@ -1684,13 +1692,15 @@
 
                     renderState();
 
-                } else {
+                    
 
-                    // Low confidence or no result, continue recording
+                } else if (result && result.text) {
+
+                    // Got transcription but low confidence, continue recording
 
                     if (statusMsg) {
 
-                        statusMsg.textContent = 'Low confidence, continue speaking...';
+                        statusMsg.textContent = `Heard: "${result.text.substring(0, 30)}..." - Continue speaking for better detection`;
 
                     }
 
@@ -1716,7 +1726,45 @@
 
                                 }
 
-                            }, 5000);
+                            }, 4000);
+
+                        }
+
+                    }
+
+                } else {
+
+                    // No transcription, continue
+
+                    if (statusMsg) {
+
+                        statusMsg.textContent = 'No clear speech detected - please speak louder and clearer';
+
+                    }
+
+                    
+
+                    // Start recording again
+
+                    if (currentState === 'detecting') {
+
+                        audioChunks = [];
+
+                        if (mediaRecorder && mediaRecorder.state === 'inactive') {
+
+                            mediaRecorder.start();
+
+                            
+
+                            setTimeout(() => {
+
+                                if (currentState === 'detecting' && mediaRecorder && mediaRecorder.state === 'recording') {
+
+                                    mediaRecorder.stop();
+
+                                }
+
+                            }, 4000);
 
                         }
 
@@ -1734,7 +1782,19 @@
 
                 if (statusMsg) {
 
-                    statusMsg.textContent = 'Processing error, please continue speaking...';
+                    statusMsg.textContent = 'Processing error - please continue speaking...';
+
+                }
+
+                
+
+                // Fallback to simulation on persistent errors
+
+                if (error.message && error.message.includes('model')) {
+
+                    console.log('Model error, falling back to simulation');
+
+                    startSimulation();
 
                 }
 
@@ -2294,34 +2354,6 @@
 
                     
 
-                    ${detectionResults.length > 0 ? `
-
-                    <details style="margin: 20px 0;">
-
-                        <summary style="cursor: pointer; color: #6c757d; font-size: 14px; margin-bottom: 10px;">View All Detection Results</summary>
-
-                        <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; font-size: 12px;">
-
-                            ${detectionResults.map(r => `
-
-                                <div style="margin: 5px 0; padding: 8px; ${r.language === detectedLanguage ? 'background: #d4edda; border-left: 3px solid #28a745;' : 'background: white;'} border-radius: 4px;">
-
-                                    <strong>${r.language}</strong>: ${r.confidence}% confidence<br>
-
-                                    <span style="color: #6c757d;">"${r.text || 'No transcription'}"</span>
-
-                                </div>
-
-                            `).join('')}
-
-                        </div>
-
-                    </details>
-
-                    ` : ''}
-
-                    
-
                     <button class="connect-btn" onclick="connectInterpreter()">
 
                         CONNECT ${detectedLanguage.toUpperCase()} INTERPRETER
@@ -2425,34 +2457,6 @@
                         </div>
 
                     </div>
-
-                    
-
-                    ${detectionResults.length > 0 ? `
-
-                    <details style="margin: 20px 0;">
-
-                        <summary style="cursor: pointer; color: #6c757d; font-size: 14px; margin-bottom: 10px;">View Detection Attempts</summary>
-
-                        <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; font-size: 12px;">
-
-                            ${detectionResults.map(r => `
-
-                                <div style="margin: 5px 0; padding: 8px; background: white; border-radius: 4px;">
-
-                                    <strong>${r.language}</strong>: ${r.confidence}% confidence<br>
-
-                                    <span style="color: #6c757d;">"${r.text || 'No transcription'}"</span>
-
-                                </div>
-
-                            `).join('')}
-
-                        </div>
-
-                    </details>
-
-                    ` : ''}
 
                     
 
