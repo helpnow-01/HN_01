@@ -1128,21 +1128,27 @@
 
         
 
-        // Language mapping for our target languages
+        // Target languages with their Whisper language codes
 
-        const languageMap = {
+        const targetLanguages = {
 
-            'hi': 'Hindi',
+            'hindi': { name: 'Hindi', code: 'hi' },
 
-            'zh': 'Mandarin',
+            'chinese': { name: 'Mandarin', code: 'zh' },
 
-            'yue': 'Cantonese', 
+            'cantonese': { name: 'Cantonese', code: 'yue' },
 
-            'ar': 'Arabic',
+            'arabic': { name: 'Arabic', code: 'ar' },
 
-            'vi': 'Vietnamese'
+            'vietnamese': { name: 'Vietnamese', code: 'vi' }
 
         };
+
+        
+
+        let detectedText = '';
+
+        let detectionResults = [];
 
         
 
@@ -1156,9 +1162,9 @@
 
                     console.log('Loading Whisper model... This may take a moment on first use.');
 
-                    // Use the smaller base model for faster loading and processing
+                    // Use the multilingual model for better language detection
 
-                    whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base');
+                    whisperPipeline = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small');
 
                     console.log('Whisper model loaded successfully!');
 
@@ -1226,9 +1232,9 @@
 
         
 
-        // Process audio with Whisper
+        // Process audio with multi-language detection
 
-        async function processAudioWithWhisper(audioData) {
+        async function detectLanguageFromAudio(audioData) {
 
             try {
 
@@ -1240,61 +1246,121 @@
 
                 
 
-                // Run Whisper inference
-
-                const result = await whisperPipeline(audioData, {
-
-                    return_timestamps: false,
-
-                    task: 'transcribe'
-
-                });
+                console.log('Running language detection on audio...');
 
                 
 
-                console.log('Whisper result:', result);
+                // Test each target language
+
+                const results = [];
 
                 
 
-                // Extract language from result
+                for (const [key, lang] of Object.entries(targetLanguages)) {
 
-                // Note: Whisper base model returns language info differently
+                    try {
 
-                let detectedLang = 'en'; // fallback
+                        console.log(`Testing ${lang.name} (${lang.code})...`);
 
-                let confidence = 0.5; // fallback
+                        
 
-                
+                        const result = await whisperPipeline(audioData, {
 
-                // Try to get language info from the result
+                            language: lang.code,
 
-                if (result && result.text && result.text.trim().length > 0) {
+                            task: 'transcribe',
 
-                    // For demo purposes, we'll do a simple text analysis
+                            return_timestamps: false
 
-                    // to guess the language based on character patterns
+                        });
 
-                    detectedLang = guessLanguageFromText(result.text);
+                        
 
-                    confidence = Math.random() * 0.3 + 0.7; // 70-100% for demo
+                        const text = result.text?.trim() || '';
+
+                        const confidence = calculateConfidence(text, lang.code);
+
+                        
+
+                        results.push({
+
+                            language: lang.name,
+
+                            code: lang.code,
+
+                            text: text,
+
+                            confidence: confidence,
+
+                            textLength: text.length
+
+                        });
+
+                        
+
+                        console.log(`${lang.name}: "${text}" (confidence: ${confidence}%)`);
+
+                        
+
+                    } catch (error) {
+
+                        console.error(`Error testing ${lang.name}:`, error);
+
+                        results.push({
+
+                            language: lang.name,
+
+                            code: lang.code,
+
+                            text: '',
+
+                            confidence: 0,
+
+                            textLength: 0
+
+                        });
+
+                    }
 
                 }
 
                 
 
-                return {
+                // Find the best result
 
-                    language: detectedLang,
+                const bestResult = results.reduce((best, current) => {
 
-                    confidence: confidence,
+                    // Prioritize non-empty results with higher confidence
 
-                    text: result.text || ''
+                    if (current.textLength > 0 && current.confidence > best.confidence) {
 
-                };
+                        return current;
+
+                    }
+
+                    return best;
+
+                }, results[0]);
+
+                
+
+                detectionResults = results;
+
+                
+
+                console.log('Detection results:', results);
+
+                console.log('Best result:', bestResult);
+
+                
+
+                return bestResult;
+
+                
 
             } catch (error) {
 
-                console.error('Whisper processing error:', error);
+                console.error('Language detection error:', error);
 
                 return null;
 
@@ -1304,49 +1370,87 @@
 
         
 
-        // Simple language guessing based on text patterns (for demo)
+        // Calculate confidence based on transcription quality
 
-        function guessLanguageFromText(text) {
+        function calculateConfidence(text, languageCode) {
 
-            if (!text || text.trim().length === 0) return 'en';
+            if (!text || text.trim().length === 0) {
 
-            
-
-            // Simple heuristics for our target languages
-
-            const arabicPattern = /[\u0600-\u06FF]/;
-
-            const chinesePattern = /[\u4e00-\u9fff]/;
-
-            const hindiPattern = /[\u0900-\u097F]/;
-
-            const vietnamesePattern = /[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i;
-
-            
-
-            if (arabicPattern.test(text)) return 'ar';
-
-            if (chinesePattern.test(text)) {
-
-                // For demo, randomly choose between Mandarin and Cantonese
-
-                return Math.random() > 0.5 ? 'zh' : 'yue';
+                return 0;
 
             }
 
-            if (hindiPattern.test(text)) return 'hi';
+            
 
-            if (vietnamesePattern.test(text)) return 'vi';
+            let confidence = 50; // Base confidence
 
             
 
-            // For demo purposes, randomly select from our target languages
+            // Length bonus - longer transcriptions usually more reliable
 
-            // if we can't detect from text patterns
+            if (text.length > 10) confidence += 20;
 
-            const targetLangs = ['hi', 'zh', 'yue', 'ar', 'vi'];
+            if (text.length > 20) confidence += 10;
 
-            return targetLangs[Math.floor(Math.random() * targetLangs.length)];
+            
+
+            // Language-specific patterns
+
+            if (languageCode === 'ar') {
+
+                // Arabic script
+
+                const arabicPattern = /[\u0600-\u06FF]/;
+
+                if (arabicPattern.test(text)) confidence += 25;
+
+            } else if (languageCode === 'zh' || languageCode === 'yue') {
+
+                // Chinese characters
+
+                const chinesePattern = /[\u4e00-\u9fff]/;
+
+                if (chinesePattern.test(text)) confidence += 25;
+
+            } else if (languageCode === 'hi') {
+
+                // Hindi/Devanagari script
+
+                const hindiPattern = /[\u0900-\u097F]/;
+
+                if (hindiPattern.test(text)) confidence += 25;
+
+            } else if (languageCode === 'vi') {
+
+                // Vietnamese diacritics
+
+                const vietnamesePattern = /[àáảãạăắằẳẵặâấầẩẫậđèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i;
+
+                if (vietnamesePattern.test(text)) confidence += 25;
+
+            }
+
+            
+
+            // Word count bonus
+
+            const wordCount = text.split(' ').filter(word => word.length > 0).length;
+
+            if (wordCount > 2) confidence += 10;
+
+            if (wordCount > 5) confidence += 5;
+
+            
+
+            // Penalize very short or nonsensical results
+
+            if (text.length < 3) confidence -= 30;
+
+            if (text.includes('...') || text.includes('[') || text.includes(']')) confidence -= 20;
+
+            
+
+            return Math.max(0, Math.min(100, confidence));
 
         }
 
@@ -1364,7 +1468,7 @@
 
                 if (statusMsg) {
 
-                    statusMsg.textContent = 'Loading AI model...';
+                    statusMsg.textContent = 'Loading AI model (this may take 60+ seconds first time)...';
 
                 }
 
@@ -1376,7 +1480,7 @@
 
                 if (statusMsg) {
 
-                    statusMsg.textContent = 'Model loaded! Starting detection...';
+                    statusMsg.textContent = 'Model loaded! Speak now in any target language...';
 
                 }
 
@@ -1388,13 +1492,13 @@
 
                     audio: {
 
-                        sampleRate: 16000,
-
                         channelCount: 1,
 
                         echoCancellation: true,
 
-                        noiseSuppression: true
+                        noiseSuppression: true,
+
+                        autoGainControl: true
 
                     } 
 
@@ -1404,13 +1508,7 @@
 
                 // Set up Web Audio API for processing
 
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({
-
-                    sampleRate: 16000
-
-                });
-
-                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
                 source = audioContext.createMediaStreamSource(stream);
 
@@ -1418,7 +1516,13 @@
 
                 // Start recording for Whisper processing
 
-                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder = new MediaRecorder(stream, {
+
+                    mimeType: 'audio/webm'
+
+                });
+
+                
 
                 audioChunks = [];
 
@@ -1456,41 +1560,17 @@
 
                 
 
-                // Process audio every 3 seconds
+                // Record for 5 seconds, then process
 
-                const processingInterval = setInterval(async () => {
+                setTimeout(async () => {
 
-                    if (currentState !== 'detecting') {
-
-                        clearInterval(processingInterval);
-
-                        return;
-
-                    }
-
-                    
-
-                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    if (currentState === 'detecting' && mediaRecorder && mediaRecorder.state === 'recording') {
 
                         mediaRecorder.stop();
 
-                        // Start a new recording
-
-                        setTimeout(() => {
-
-                            if (currentState === 'detecting' && mediaRecorder) {
-
-                                audioChunks = [];
-
-                                mediaRecorder.start();
-
-                            }
-
-                        }, 100);
-
                     }
 
-                }, 3000);
+                }, 5000);
 
                 
 
@@ -1500,19 +1580,19 @@
 
                     if (currentState === 'detecting') {
 
-                        // If no confident detection in 15 seconds, use fallback
+                        // Timeout - no confident detection
 
-                        const fallbackLanguages = ['Hindi', 'Mandarin', 'Arabic', 'Vietnamese', 'Cantonese'];
+                        detectedLanguage = 'Unknown';
 
-                        detectedLanguage = fallbackLanguages[Math.floor(Math.random() * fallbackLanguages.length)];
+                        confidenceScore = 0;
 
-                        confidenceScore = Math.floor(Math.random() * 20) + 75; // 75-94% for timeout
+                        detectedText = 'No speech detected or language not recognized';
 
                         
 
                         stopAudioProcessing();
 
-                        currentState = 'detected';
+                        currentState = 'timeout';
 
                         renderState();
 
@@ -1546,9 +1626,19 @@
 
                 
 
+                const statusMsg = document.getElementById('whisperStatus');
+
+                if (statusMsg) {
+
+                    statusMsg.textContent = 'Processing speech... Testing all languages...';
+
+                }
+
+                
+
                 // Convert audio chunks to audio buffer
 
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
 
                 const arrayBuffer = await audioBlob.arrayBuffer();
 
@@ -1562,27 +1652,27 @@
 
                 
 
-                // Process with Whisper
+                // Run multi-language detection
 
-                const result = await processAudioWithWhisper(audioData);
+                const result = await detectLanguageFromAudio(audioData);
 
                 
 
-                if (result && result.confidence > 0.6 && currentState === 'detecting') {
+                if (result && result.confidence > 30 && currentState === 'detecting') {
 
-                    // Found confident detection!
+                    // Found detection!
 
-                    const langCode = result.language;
+                    detectedLanguage = result.language;
 
-                    detectedLanguage = languageMap[langCode] || 'Unknown';
+                    confidenceScore = result.confidence;
 
-                    confidenceScore = Math.floor(result.confidence * 100);
+                    detectedText = result.text;
 
                     
 
-                    console.log(`Detected: ${detectedLanguage} (${confidenceScore}%)`);
+                    console.log(`Final Detection: ${detectedLanguage} (${confidenceScore}%)`);
 
-                    console.log(`Transcribed text: "${result.text}"`);
+                    console.log(`Transcribed: "${detectedText}"`);
 
                     
 
@@ -1594,6 +1684,44 @@
 
                     renderState();
 
+                } else {
+
+                    // Low confidence or no result, continue recording
+
+                    if (statusMsg) {
+
+                        statusMsg.textContent = 'Low confidence, continue speaking...';
+
+                    }
+
+                    
+
+                    // Start recording again
+
+                    if (currentState === 'detecting') {
+
+                        audioChunks = [];
+
+                        if (mediaRecorder && mediaRecorder.state === 'inactive') {
+
+                            mediaRecorder.start();
+
+                            
+
+                            setTimeout(() => {
+
+                                if (currentState === 'detecting' && mediaRecorder && mediaRecorder.state === 'recording') {
+
+                                    mediaRecorder.stop();
+
+                                }
+
+                            }, 5000);
+
+                        }
+
+                    }
+
                 }
 
                 
@@ -1601,6 +1729,14 @@
             } catch (error) {
 
                 console.error('Error processing audio:', error);
+
+                const statusMsg = document.getElementById('whisperStatus');
+
+                if (statusMsg) {
+
+                    statusMsg.textContent = 'Processing error, please continue speaking...';
+
+                }
 
             }
 
@@ -1896,6 +2032,18 @@
 
                     break;
 
+                case 'timeout':
+
+                    renderTimeoutState(mainInterface);
+
+                    break;
+
+                case 'manual':
+
+                    renderManualState(mainInterface);
+
+                    break;
+
                 case 'connecting':
 
                     renderConnectingState(mainInterface);
@@ -1921,6 +2069,30 @@
                     break;
 
             }
+
+        }
+
+        
+
+        // Connect interpreter
+
+        function connectInterpreter() {
+
+            currentState = 'connecting';
+
+            renderState();
+
+            
+
+            // Simulate connection time (3 seconds)
+
+            setTimeout(() => {
+
+                currentState = 'connected';
+
+                renderState();
+
+            }, 3000);
 
         }
 
@@ -2108,6 +2280,48 @@
 
                     
 
+                    ${detectedText ? `
+
+                    <div style="background: #f8f9fa; border-radius: 12px; padding: 20px; margin: 20px 0; border-left: 4px solid #00C853;">
+
+                        <div style="color: #495057; font-size: 14px; margin-bottom: 8px; font-weight: 600;">Transcribed Speech:</div>
+
+                        <div style="color: #212529; font-size: 16px; font-style: italic;">"${detectedText}"</div>
+
+                    </div>
+
+                    ` : ''}
+
+                    
+
+                    ${detectionResults.length > 0 ? `
+
+                    <details style="margin: 20px 0;">
+
+                        <summary style="cursor: pointer; color: #6c757d; font-size: 14px; margin-bottom: 10px;">View All Detection Results</summary>
+
+                        <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; font-size: 12px;">
+
+                            ${detectionResults.map(r => `
+
+                                <div style="margin: 5px 0; padding: 8px; ${r.language === detectedLanguage ? 'background: #d4edda; border-left: 3px solid #28a745;' : 'background: white;'} border-radius: 4px;">
+
+                                    <strong>${r.language}</strong>: ${r.confidence}% confidence<br>
+
+                                    <span style="color: #6c757d;">"${r.text || 'No transcription'}"</span>
+
+                                </div>
+
+                            `).join('')}
+
+                        </div>
+
+                    </details>
+
+                    ` : ''}
+
+                    
+
                     <button class="connect-btn" onclick="connectInterpreter()">
 
                         CONNECT ${detectedLanguage.toUpperCase()} INTERPRETER
@@ -2157,6 +2371,116 @@
                         </div>
 
                     </div>
+
+                </div>
+
+            `;
+
+            updateCallTimer();
+
+        }
+
+        
+
+        // Render timeout state
+
+        function renderTimeoutState(container) {
+
+            container.innerHTML = `
+
+                <div class="state-content">
+
+                    <div class="call-info">
+
+                        <div class="caller-number">Caller: 0432 XXX XXX</div>
+
+                        <div class="call-timer" id="callTimer">Call Duration: 00:00</div>
+
+                    </div>
+
+                    
+
+                    <h2 style="color: #ff9800; margin-bottom: 30px; text-align: center;">⏱️ Detection Timeout</h2>
+
+                    
+
+                    <div style="background: #fff3e0; border-radius: 16px; padding: 30px; margin: 20px 0; border: 2px solid #ff9800;">
+
+                        <div style="color: #e65100; font-size: 18px; font-weight: 600; margin-bottom: 10px;">No Clear Language Detected</div>
+
+                        <div style="color: #f57c00; font-size: 14px; margin-bottom: 20px;">
+
+                            ${detectedText ? `We heard: "${detectedText}"` : 'No speech was clearly detected'}
+
+                        </div>
+
+                        
+
+                        <div style="color: #bf360c; font-size: 14px;">
+
+                            Please ensure you are speaking clearly in one of our supported languages:
+
+                            <strong>Hindi, Mandarin, Cantonese, Arabic, Vietnamese</strong>
+
+                        </div>
+
+                    </div>
+
+                    
+
+                    ${detectionResults.length > 0 ? `
+
+                    <details style="margin: 20px 0;">
+
+                        <summary style="cursor: pointer; color: #6c757d; font-size: 14px; margin-bottom: 10px;">View Detection Attempts</summary>
+
+                        <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; font-size: 12px;">
+
+                            ${detectionResults.map(r => `
+
+                                <div style="margin: 5px 0; padding: 8px; background: white; border-radius: 4px;">
+
+                                    <strong>${r.language}</strong>: ${r.confidence}% confidence<br>
+
+                                    <span style="color: #6c757d;">"${r.text || 'No transcription'}"</span>
+
+                                </div>
+
+                            `).join('')}
+
+                        </div>
+
+                    </details>
+
+                    ` : ''}
+
+                    
+
+                    <div style="display: flex; gap: 15px; justify-content: center; margin-top: 30px;">
+
+                        <button class="connect-btn" onclick="retryDetection()" style="background: linear-gradient(135deg, #2196F3, #42A5F5);">
+
+                            🎤 RETRY DETECTION
+
+                        </button>
+
+                        
+
+                        <button class="connect-btn" onclick="manualLanguageSelect()" style="background: linear-gradient(135deg, #ff9800, #ffb74d);">
+
+                            📋 MANUAL SELECT
+
+                        </button>
+
+                    </div>
+
+                    
+
+                    <p style="color: #7f8c8d; margin-top: 20px; text-align: center; font-size: 14px;">
+
+                        Retry detection or manually select a language to continue
+
+                    </p>
 
                 </div>
 
@@ -2438,25 +2762,133 @@
 
         
 
-        // Connect interpreter
+        // Retry detection
 
-        function connectInterpreter() {
+        function retryDetection() {
 
-            currentState = 'connecting';
+            // Reset detection state
 
-            renderState();
+            detectedLanguage = '';
+
+            confidenceScore = 0;
+
+            detectedText = '';
+
+            detectionResults = [];
 
             
 
-            // Simulate connection time (3 seconds)
+            // Restart detection
 
-            setTimeout(() => {
+            currentState = 'detecting';
 
-                currentState = 'connected';
+            renderState();
 
-                renderState();
+            startAudioVisualization();
 
-            }, 3000);
+            startRealTimeDetection();
+
+        }
+
+        
+
+        // Manual language selection
+
+        function manualLanguageSelect() {
+
+            currentState = 'manual';
+
+            renderState();
+
+        }
+
+        
+
+        // Render manual selection state
+
+        function renderManualState(container) {
+
+            container.innerHTML = `
+
+                <div class="state-content">
+
+                    <div class="call-info">
+
+                        <div class="caller-number">Caller: 0432 XXX XXX</div>
+
+                        <div class="call-timer" id="callTimer">Call Duration: 00:00</div>
+
+                    </div>
+
+                    
+
+                    <h2 style="color: #2196F3; margin-bottom: 30px; text-align: center;">Manual Language Selection</h2>
+
+                    
+
+                    <p style="color: #6c757d; margin-bottom: 30px; text-align: center;">
+
+                        Please select the caller's language:
+
+                    </p>
+
+                    
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 30px 0;">
+
+                        ${Object.values(targetLanguages).map(lang => `
+
+                            <button 
+
+                                class="connect-btn" 
+
+                                onclick="selectManualLanguage('${lang.name}')"
+
+                                style="padding: 20px; font-size: 18px; margin: 0;"
+
+                            >
+
+                                ${lang.name}
+
+                            </button>
+
+                        `).join('')}
+
+                    </div>
+
+                    
+
+                    <button class="reset-btn" onclick="retryDetection()" style="margin-top: 20px;">
+
+                        🎤 Try Auto-Detection Again
+
+                    </button>
+
+                </div>
+
+            `;
+
+            updateCallTimer();
+
+        }
+
+        
+
+        // Select manual language
+
+        function selectManualLanguage(language) {
+
+            detectedLanguage = language;
+
+            confidenceScore = 100; // Manual selection = 100% confidence
+
+            detectedText = 'Language manually selected by operator';
+
+            
+
+            currentState = 'detected';
+
+            renderState();
 
         }
 
@@ -2543,6 +2975,12 @@
         window.transferToService = transferToService;
 
         window.endCall = endCall;
+
+        window.retryDetection = retryDetection;
+
+        window.manualLanguageSelect = manualLanguageSelect;
+
+        window.selectManualLanguage = selectManualLanguage;
 
         
 
